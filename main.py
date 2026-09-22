@@ -49,6 +49,16 @@ def init_database():
                         updated_at TIMESTAMPTZ DEFAULT NOW()
                     )
                 """)
+                            cur.execute("""
+                CREATE TABLE IF NOT EXISTS api_usage (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    total_tokens INTEGER DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
             conn.commit()
 
         print("Database initialized successfully")
@@ -289,7 +299,43 @@ def call_openai(
                 user_id,
                 response_id
             )
+# 記錄 OpenAI API Token 使用量
+usage = result.get("usage", {})
 
+input_tokens = usage.get("input_tokens", 0)
+output_tokens = usage.get("output_tokens", 0)
+total_tokens = usage.get(
+    "total_tokens",
+    input_tokens + output_tokens
+)
+
+if DATABASE_URL:
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO api_usage (
+                        user_id,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        user_id,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens
+                    )
+                )
+            conn.commit()
+    except Exception as e:
+        print(
+            f"API usage save error: "
+            f"{type(e).__name__}: {e}"
+        )
         for item in result.get("output", []):
             if item.get("type") == "message":
                 for content in item.get(
